@@ -1,0 +1,153 @@
+---
+title: "Missing Data for Nicole"
+author: "Michelle Byrne"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+##### Check missing data patterns and MCAR. 
+
+##### My example data I'm working with here is longitudinal (panel) data with four time points, and we'll need to work with both long and wide format. To start by testing if the data is MCAR, I'll need it to be long format. This is because it's hard to test MCAR if you have separate variables that are too colinear, and repeated measures from the same person usually are. Making this long format allows each row (i.e., time point) to have truly separate observed variables and test MCAR.
+
+##### But then consider carefully what variables you want imputed (for example, if a repeated measure was not collected at all during one wave/time point, you may not want it imputed). For that reason, once we're ready to actually impute the data, we'll switch back to wide format.
+
+```{r intro}
+workdir='C:/Users/michelle/Dropbox/academic/collaboration/giuliani_missing/'
+data <- read.csv(file.path(workdir,"AllData_wide_v3_excl.csv", fsep="")) # Start here with wide format to see how it's moved to long format 
+library(panelr)
+data_long <- long_panel(data, prefix = "T", label_location = "beginning", begin = 1, end = 4)
+
+```
+
+
+##### Remember as a first step to think of the possibility that the missing values in your dataset could theoretically be dependent on their missingness - in other words, the missing data could have significantly different values than the non-missing data, if we were able to know what the missing values were. We can't know that, so whatever you decide is only an assumption. If you don't think there is a good reason why this might be the case, you could assume the data is missing at random. Then you can run a test on top of that to see if it is also missing *completely* at random, which means the missingness is also not related to the other observed variables (that we do know the values of).
+
+##### The MissMech package can test for MCAR and runs both parametric and non-parametric tests.
+##### Info: http://www.jstatsoft.org/v56/i06/
+
+```{r check patterns}
+library(MissMech)
+
+#First, get an overview of how much missing data you have for each variable (and you'll want to report N and/or percentage of missing for each variable)
+Missinginfo_long <- OrderMissing(data_long, del.lesscases = 0) #You can change del.lesscases if you want a variable with more than x missing values to be deleted from the dataset. 
+
+summary(Missinginfo_long) #Remember if this is for the long format data. If you want to just see how many are missing for each time point variable, change the dataset in this function back to the wide one (probably more useful for reporting).
+
+Missinginfo <- OrderMissing(data, del.lesscases = 0)
+summary(Missinginfo)
+
+write.csv (summary(Missinginfo), file.path(workdir,"MissingInfo.csv", fsep=""))
+```
+
+##### Now you're ready to test if your data is MCAR. If the tests are significant, it is not.
+
+##### NOTE: If your data matrix is singular (you'll get the dread pirate "system is computationally singular" message), TestMCARNormality won't work. Try removing extra variables that may be colinear. Definitely never have variables in your dataset that are derived from raw variables (e.g., transformed or totaled. Impute the raw data first and then re-transform or re-total). If you have longitudinal data and try this one wide format, it probably won't work.
+
+```{r test mcar}
+data.nummat <- data.matrix(data_long, rownames.force = NA)
+data.out <- TestMCARNormality(data.nummat)
+print(data.out)
+
+# Here's some code to quickly check what's mega correlated in your dataset if you get the singular thing:
+library(Hmisc)
+library(corrplot)
+corrs <- rcorr(as.matrix(data_long)) 
+corrplot(corrs$r, type = "upper", order = "hclust", tl.col = "black", tl.srt = 45)
+
+```
+
+
+##### If it's not MCAR, it is ok, but you should figure out what's going on and report differences in observed variables between your missing and non-missing main outcomes of interest. (main predictor and outcome variables). Here's an example. Maybe helCrv missingness is dependent on age:
+```{r obs vars missingness}
+data_long_missing <- data_long
+
+# Group the missingness of whatever variable you want:
+for (i in 1:nrow(data_long_missing)) {
+  if (is.na(data_long_missing$helCrv[i])) {
+  data_long_missing$helcrv_missing[i] = 1
+} else {
+  data_long_missing$helcrv_missing[i] = 0
+}
+}
+
+# ANOVA to check if age significant differs between missing helcrv and not missing helcrv:
+helcrv_aov <- aov(age ~ helcrv_missing, data = data_long_missing)
+summary (helcrv_aov) # Spoiler, it doesn't.
+
+# You could also check this in wide format, too, to see if a variable's missingness at a certain time point is dependent on some other observed variable.
+
+```
+
+
+# ```{r impute}
+# # Multiple Imputation using Amelia and Zelig. Probs wanna use wide data for this
+# 
+# library("Amelia")
+# 
+# 
+# a.out <- amelia(data, m = 10, idvars = c("sub"), noms = c("condition","gender","ethnicity"))
+# 
+# #plot(a.out, which.vars = 3:7)
+# #plot(a.out, which.vars = 13:18)
+# #plot(a.out, which.vars = 19:29)
+# 
+# #save(a.out, file = "imputations.RData")
+# 
+# #write.amelia(obj=a.out, file.stem = "imputeddata")
+# 
+# library("Zelig")
+# 
+# z.out <- zelig(outcome_var ~ predictor, model = "ls", data = a.out)
+# 
+# # Note: Documentation says the above should be:
+# # z.out <- zelig(LogCRP_Day1_WINS ~ Parent_APQ_INV_1, model = "ls", data = a.out$imputations)
+# # but this returns Error: Not a data frame.
+# # Only when I remove $imputations from a.out does it work.
+# # also tried: a.out.df <- as.data.frame(a.out$imputations)), this does make a data frame, but how do I tell it to run the regression on each of the imputed variables?
+# 
+# z.out
+# # Look for "Model: Combined Imputations" at the very end of the printout. Why doesn't this output look the same as online examples? 
+# 
+# #-----------------------------------
+# 
+# # Single imputation using EM with Amelia running without a bootstrap
+# 
+# a.outEM <- amelia(data, m = 1, idvars = c("sub"), noms = c("condition","gender","ethnicity"), boot.type = "none")
+# 
+# write.amelia(obj=a.outEM, file.stem = "imputeddataEM")
+# 
+# ```
+# 
+# 
+# ```{r em models}
+# # Linear models with Single Imputed data EM (using Amelia)
+# 
+# EMdata <- read.csv("imputeddataEM1.csv")
+# 
+# # APQ Involvement
+# 
+# model1 <- lm(outcome_var ~ predictor, data = EMdata)
+# summary(model1)
+# confint(model1, 'some_var', level=0.95)
+# ```
+# 
+# ```{r fiml models}
+# 
+# # FIML using Lavaan
+# # fit <- sem(model, data, missing='fiml')
+# 
+# library("lavaan")
+# 
+# # Create descriptive model object
+# model1 <- '
+# 
+# # Note that fixed.x=FALSE in the sem may eliminate need to estimate variances and covariances of predictors (??)
+# 
+# fit1 <- sem(model=model1, data=data, missing='fiml', fixed.x=FALSE)
+# 
+# summary(fit1, fit.measures=TRUE, rsquare=TRUE, standardize=TRUE)
+# 
+# # To select the best fitting model, The model with the smallest AIC and BIC is chosen. 
+# 
+# #Reminder: CFI>0.9, TLI>0.9, RMSEA<0.08, SRMR<0.08 (Marsh, et al. (2010). Psychol Assess 22:471)
