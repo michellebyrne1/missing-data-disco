@@ -14,7 +14,7 @@ output:
 
 ```{r intro}
 workdir='C:/Users/michelle/Dropbox/academic/collaboration/giuliani_missing/'
-data <- read.csv(file.path(workdir,"AllData_wide_v3_excl.csv", fsep="")) # Start here with wide format to see how it's moved to long format 
+data <- read.csv(file.path(workdir,"AllData_wide_v4_excl.csv", fsep="")) # Start here with wide format to see how it's moved to long format 
 library(panelr)
 data_long <- long_panel(data, prefix = "T", label_location = "beginning", begin = 1, end = 4)
 
